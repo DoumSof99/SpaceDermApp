@@ -87,3 +87,98 @@ code {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
     text-align: start;
 }
+/* ---------- SpaceDermApp ---------- */
+:root {
+    --bg: #0f1424;
+    --card: #182036;
+    --text: #e8ecf6;
+    --muted: #9aa5c0;
+    --accent: #4f8cff;
+    --ok: #3ecf8e;
+    --warn: #ffb347;
+}
+
+html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+.topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid #263052;
+}
+
+.topbar .logo { font-weight: 700; font-size: 1.2rem; }
+.topbar .tag { color: var(--muted); font-size: 0.9rem; }
+
+.content {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 1rem;
+}
+
+h1 { margin: 0.5rem 0 0.25rem; font-size: 1.6rem; }
+h2 { margin: 0 0 0.6rem; font-size: 1.1rem; }
+.subtitle { color: var(--muted); margin-top: 0; }
+
+.card {
+    background: var(--card);
+    border-radius: 12px;
+    padding: 1rem;
+    margin: 1rem 0;
+}
+
+button {
+    font: inherit;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    border: 1px solid #36446e;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+}
+
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+progress { width: 100%; height: 12px; }
+
+textarea {
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 0.6rem;
+    padding: 0.6rem;
+    border-radius: 8px;
+    border: 1px solid #36446e;
+    background: #10162a;
+    color: var(--text);
+    font: inherit;
+}
+
+.row { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+
+.photo {
+    display: block;
+    max-width: 100%;
+    max-height: 320px;
+    margin-top: 0.75rem;
+    border-radius: 8px;
+}
+
+.msg { margin: 0.6rem 0; padding: 0.6rem 0.8rem; border-radius: 8px; }
+.msg.doctor { background: #233056; }
+.msg.ai { background: #1d2a26; }
+.msg .who { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.2rem; }
+.msg .text { white-space: pre-wrap; }
+
+.small { color: var(--muted); font-size: 0.85rem; }
+.ok { color: var(--ok); }
+.warning { color: var(--warn); }
+.disclaimer { text-align: center; color: var(--warn); font-weight: 600; }

@@ -1,7 +1,191 @@
 ﻿@page "/"
+@using SpaceDermApp.Services
+@implements IDisposable
+@inject AiService Ai
 
-<PageTitle>Home</PageTitle>
+<PageTitle>SpaceDermApp</PageTitle>
 
-<h1>Hello, world!</h1>
+<h1>Crew doctor's assistant</h1>
+<p class="subtitle">Day 140 on the way to Mars. Earth is up to 22 minutes away. Ask the AI for ideas &mdash; you make the diagnosis.</p>
 
-Welcome to your new app.
+@* 1. The AI *@
+<section class="card">
+    <h2>1. AI on this laptop</h2>
+    @if (supported == false)
+    {
+        <p class="warning">This browser cannot run the AI (no WebGPU). Please use a recent Chrome or Edge.</p>
+    }
+    else if (Ai.IsLoaded)
+    {
+        <p class="ok">AI ready &mdash; Llama 3.2 1B, running offline in the browser.</p>
+    }
+    else if (loading)
+    {
+        <progress max="1" value="@progress"></progress>
+        <p class="small">@progressText</p>
+    }
+    else
+    {
+        <button class="primary" @onclick="LoadAi" disabled="@(supported != true)">Load AI</button>
+        <p class="small">First time: downloads about 700 MB, then it is kept in the browser.</p>
+    }
+</section>
+
+@* 2. The photo *@
+<section class="card">
+    <h2>2. Photo of the skin</h2>
+    <InputFile OnChange="OnPhotoSelected" accept="image/*" />
+    @if (photoDataUrl is not null)
+    {
+        <img class="photo" src="@photoDataUrl" alt="Photo of the skin problem" />
+        <p class="small">The photo is kept for the doctor. The AI does not see it &mdash; describe what you see below.</p>
+    }
+</section>
+
+@* 3. The chat *@
+<section class="card">
+    <h2>3. Ask the AI</h2>
+
+    @foreach (var m in chat)
+    {
+        <div class="msg @(m.role == "user" ? "doctor" : "ai")">
+            <div class="who">@(m.role == "user" ? "Doctor" : "AI")</div>
+            <div class="text">@Clean(m.content)</div>
+        </div>
+    }
+    @if (busy)
+    {
+        <div class="msg ai">
+            <div class="who">AI</div>
+            <div class="text">@(string.IsNullOrEmpty(streaming) ? "Thinking..." : Clean(streaming))</div>
+        </div>
+    }
+
+    <textarea @bind="question" @bind:event="oninput" rows="3"
+              placeholder="e.g. Red, itchy patch on the left forearm, about 3 cm, for 2 days, started after exercise."></textarea>
+    <div class="row">
+        <button class="primary" @onclick="Ask" disabled="@(!Ai.IsLoaded || busy || string.IsNullOrWhiteSpace(question))">Ask</button>
+        <button @onclick="NewCase" disabled="@busy">New case</button>
+    </div>
+    @if (error is not null)
+    {
+        <p class="warning">@error</p>
+    }
+</section>
+
+<p class="disclaimer">Ideas only &mdash; not a diagnosis. The crew doctor decides.</p>
+
+@code {
+    private bool? supported;
+    private bool loading;
+    private double progress;
+    private string progressText = "Starting...";
+
+    private string? photoDataUrl;
+
+    private readonly List<ChatMessage> chat = new();
+    private string question = "";
+    private string streaming = "";
+    private bool busy;
+    private string? error;
+
+    // How many past messages we send back to the AI (it can read only 4096 tokens at a time).
+    private const int MaxHistory = 6;
+
+    protected override void OnInitialized()
+    {
+        Ai.ProgressChanged += OnProgress;
+        Ai.TokenReceived += OnToken;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            supported = await Ai.IsSupportedAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadAi()
+    {
+        loading = true;
+        error = null;
+        try
+        {
+            await Ai.LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            error = "Could not load the AI: " + ex.Message;
+        }
+        loading = false;
+    }
+
+    private async Task OnPhotoSelected(InputFileChangeEventArgs e)
+    {
+        // Shrink the photo so it stays light in memory.
+        var resized = await e.File.RequestImageFileAsync("image/jpeg", 1024, 1024);
+        using var stream = resized.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        photoDataUrl = "data:image/jpeg;base64," + Convert.ToBase64String(ms.ToArray());
+    }
+
+    private async Task Ask()
+    {
+        var text = question.Trim();
+        if (text.Length == 0) return;
+
+        chat.Add(new ChatMessage("user", text));
+        question = "";
+        streaming = "";
+        error = null;
+        busy = true;
+
+        var messages = new List<ChatMessage> { new("system", SkinKnowledge.SystemPrompt) };
+        messages.AddRange(chat.TakeLast(MaxHistory));
+
+        try
+        {
+            var answer = await Ai.AskAsync(messages);
+            chat.Add(new ChatMessage("assistant", answer));
+        }
+        catch (Exception ex)
+        {
+            error = "The AI could not answer: " + ex.Message;
+        }
+        streaming = "";
+        busy = false;
+    }
+
+    private void NewCase()
+    {
+        chat.Clear();
+        photoDataUrl = null;
+        question = "";
+        error = null;
+    }
+
+    private void OnProgress(double value, string text)
+    {
+        progress = value;
+        progressText = text;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnToken(string piece)
+    {
+        streaming += piece;
+        InvokeAsync(StateHasChanged);
+    }
+
+    // The model sometimes writes **bold** markdown; show it as plain text.
+    private static string Clean(string text) => text.Replace("**", "");
+
+    public void Dispose()
+    {
+        Ai.ProgressChanged -= OnProgress;
+        Ai.TokenReceived -= OnToken;
+    }
+}
