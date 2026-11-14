@@ -1,0 +1,57 @@
+# Builds the Blazor WebAssembly app and publishes it to GitHub Pages
+# on every push to main (or by hand from the Actions tab).
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish
+        run: dotnet publish SpaceDermApp/SpaceDermApp/SpaceDermApp.csproj -c Release -o release
+
+      # The site lives at https://<user>.github.io/SpaceDermApp/, not at the root.
+      - name: Set base href
+        run: sed -i 's|<base href="/" />|<base href="/SpaceDermApp/" />|' release/wwwroot/index.html
+
+      # .nojekyll: let GitHub serve the _framework folder.
+      # 404.html: deep links (e.g. /SpaceDermApp/case) still load the app.
+      - name: Add .nojekyll and 404.html
+        run: |
+          touch release/wwwroot/.nojekyll
+          cp release/wwwroot/index.html release/wwwroot/404.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: release/wwwroot
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
