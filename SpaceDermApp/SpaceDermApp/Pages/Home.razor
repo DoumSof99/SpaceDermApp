@@ -1,96 +1,203 @@
 ﻿@page "/"
+@using System.Net
+@using System.Text
+@using System.Text.RegularExpressions
 @using SpaceDermApp.Services
 @implements IDisposable
 @inject AiService Ai
 
-<PageTitle>SpaceDermApp</PageTitle>
+<PageTitle>SpaceDermApp · Crew doctor's assistant</PageTitle>
 
-<h1>Crew doctor's assistant</h1>
-<p class="subtitle">Day 140 on the way to Mars. Earth is up to 22 minutes away. Ask the AI for ideas &mdash; you make the diagnosis.</p>
-
-@* 1. The AI *@
-<section class="card">
-    <h2>1. AI on this laptop</h2>
-    @if (supported == false)
-    {
-        <p class="warning">This browser cannot run the AI (no WebGPU). Please use a recent Chrome or Edge.</p>
-    }
-    else if (Ai.IsLoaded)
-    {
-        <p class="ok">AI ready &mdash; Llama 3.2 1B, running offline in the browser.</p>
-    }
-    else if (loading)
-    {
-        <progress max="1" value="@progress"></progress>
-        <p class="small">@progressText</p>
-    }
-    else
-    {
-        <button class="primary" @onclick="LoadAi" disabled="@(supported != true)">Load AI</button>
-        <p class="small">First time: downloads about 700 MB, then it is kept in the browser.</p>
-    }
-</section>
-
-@* 2. The photo *@
-<section class="card">
-    <h2>2. Photo of the skin</h2>
-    <InputFile OnChange="OnPhotoSelected" accept="image/*" />
-    @if (photoDataUrl is not null)
-    {
-        <img class="photo" src="@photoDataUrl" alt="Photo of the skin problem" />
-        <p class="small">The photo is kept for the doctor. The AI does not see it &mdash; describe what you see below.</p>
-    }
-</section>
-
-@* 3. The chat *@
-<section class="card">
-    <h2>3. Ask the AI</h2>
-
-    @foreach (var m in chat)
-    {
-        <div class="msg @(m.role == "user" ? "doctor" : "ai")">
-            <div class="who">@(m.role == "user" ? "Doctor" : "AI")</div>
-            <div class="text">@Clean(m.content)</div>
-        </div>
-    }
-    @if (busy)
-    {
-        <div class="msg ai">
-            <div class="who">AI</div>
-            <div class="text">@(string.IsNullOrEmpty(streaming) ? "Thinking..." : Clean(streaming))</div>
-        </div>
-    }
-
-    <textarea @bind="question" @bind:event="oninput" rows="3"
-              placeholder="e.g. Red, itchy patch on the left forearm, about 3 cm, for 2 days, started after exercise."></textarea>
-    <div class="row">
-        <button class="primary" @onclick="Ask" disabled="@(!Ai.IsLoaded || busy || string.IsNullOrWhiteSpace(question))">Ask</button>
-        <button @onclick="NewCase" disabled="@busy">New case</button>
+<section class="hero">
+    <h1>Crew doctor's assistant</h1>
+    <p class="subtitle">A second opinion for skin problems when Earth is too far away to ask.</p>
+    <div class="chips">
+        <span class="chip">🚀 Day 140 · Mars transit</span>
+        <span class="chip">📡 Earth delay ≈ 12 min</span>
+        <span class="chip @AiChipClass">🧠 @AiChipText</span>
     </div>
-    @if (error is not null)
-    {
-        <p class="warning">@error</p>
-    }
 </section>
 
-<p class="disclaimer">Ideas only &mdash; not a diagnosis. The crew doctor decides.</p>
+<ol class="steps">
+    <li class="@(Ai.IsLoaded ? "done" : "active")"><span>@(Ai.IsLoaded ? "✓" : "1")</span>Start AI</li>
+    <li class="@(photoDataUrl is not null ? "done" : Ai.IsLoaded ? "active" : "")"><span>@(photoDataUrl is not null ? "✓" : "2")</span>Add photo</li>
+    <li class="@(chat.Count > 0 ? "done" : Ai.IsLoaded ? "active" : "")"><span>@(chat.Count > 0 ? "✓" : "3")</span>Describe &amp; ask</li>
+</ol>
+
+<div class="grid">
+    <div class="col">
+        <section class="card">
+            <h2>AI assistant</h2>
+            @if (supported == false)
+            {
+                <p class="warning">This browser cannot run the AI. Please open the app in a recent Chrome or Edge.</p>
+            }
+            else if (Ai.IsLoaded)
+            {
+                <div class="ready">
+                    <span class="dot"></span>
+                    <div>
+                        <strong>Ready</strong>
+                        <p class="small">Runs offline on this device. No internet needed.</p>
+                    </div>
+                </div>
+            }
+            else if (loading)
+            {
+                <div class="bar"><div class="fill" style="width:@Percent%"></div></div>
+                <p class="small">@(cachedModel ? "Starting the AI..." : "Downloading the AI model...") @Percent%</p>
+            }
+            else
+            {
+                <button class="primary wide" @onclick="LoadAi" disabled="@(supported != true)">Start AI assistant</button>
+                <p class="small">First start downloads the model once (about 700 MB).</p>
+            }
+        </section>
+
+        <section class="card">
+            <h2>Photo of the skin</h2>
+            <label class="dropzone @(photoDataUrl is not null ? "has-photo" : "")">
+                <InputFile OnChange="OnPhotoSelected" accept="image/*" />
+                @if (photoDataUrl is null)
+                {
+                    <span class="drop-icon">📷</span>
+                    <span>Drop a photo here or click to choose</span>
+                }
+                else
+                {
+                    <img src="@photoDataUrl" alt="Photo of the skin problem" />
+                }
+            </label>
+            @if (photoDataUrl is not null)
+            {
+                <p class="small">Added at @photoTime · kept for the doctor's review.</p>
+            }
+        </section>
+    </div>
+
+    <section class="card chat-card">
+        <div class="chat-head">
+            <h2>Case discussion</h2>
+            <span class="badge">Ideas only · the doctor decides</span>
+        </div>
+
+        <div class="messages">
+            @if (chat.Count == 0 && !busy)
+            {
+                <div class="empty">
+                    <p>Describe what you see: where, size, colour, how long, what makes it worse.</p>
+                    <p class="small">Or tap one of the quick cases below.</p>
+                </div>
+            }
+
+            @foreach (var m in chat)
+            {
+                <div class="msg @(m.FromDoctor ? "doctor" : "ai")">
+                    <div class="avatar">@(m.FromDoctor ? "Dr" : "AI")</div>
+                    <div class="bubble">
+                        @if (m.FromDoctor)
+                        {
+                            @m.Text
+                        }
+                        else
+                        {
+                            @Format(m.Text)
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (busy)
+            {
+                <div class="msg ai">
+                    <div class="avatar">AI</div>
+                    <div class="bubble">
+                        @if (string.IsNullOrEmpty(streaming))
+                        {
+                            <span class="typing"><i></i><i></i><i></i></span>
+                        }
+                        else
+                        {
+                            @Format(streaming)<span class="cursor"></span>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+
+        <textarea @bind="question" @bind:event="oninput" @onkeydown="OnKeyDown" rows="3" disabled="@(!Ai.IsLoaded)"
+                  placeholder="@(Ai.IsLoaded ? "" : "Start the AI assistant first.")"></textarea>
+        <div class="row">
+            <button class="primary" @onclick="Ask" disabled="@(!Ai.IsLoaded || busy || string.IsNullOrWhiteSpace(question))">Ask AI</button>
+            <button @onclick="NewCase" disabled="@busy">New case</button>
+            <span class="hint">Ctrl + Enter to send</span>
+        </div>
+
+        <div class="quick">
+            <span class="small">@(chat.Count == 0 ? "Quick cases:" : "Quick questions:")</span>
+            @if (chat.Count == 0)
+            {
+                @foreach (var ex in SkinKnowledge.Examples)
+                {
+                    <button class="example" @onclick="() => Send(ex.Text)" disabled="@(!Ai.IsLoaded || busy)">@ex.Label</button>
+                }
+            }
+            else
+            {
+                @foreach (var q in SkinKnowledge.FollowUps)
+                {
+                    <button class="example" @onclick="() => Send(q)" disabled="@(!Ai.IsLoaded || busy)">@q</button>
+                }
+            }
+        </div>
+        @if (error is not null)
+        {
+            <p class="warning">@error</p>
+        }
+    </section>
+</div>
+
+<details class="sources">
+    <summary>Sources &amp; AI use</summary>
+    <ul>
+        @foreach (var s in SkinKnowledge.Sources)
+        {
+            <li><a href="@s.Url" target="_blank" rel="noopener">@s.Title</a></li>
+        }
+    </ul>
+    <p class="small">
+        AI model: Llama 3.2 1B (Meta), running in the browser with WebLLM.
+        The app was built with help from Claude (AI). Not a medical device: ideas only, the crew doctor decides.
+    </p>
+</details>
 
 @code {
+    private record ChatEntry(bool FromDoctor, string Text);
+
     private bool? supported;
+    private bool cachedModel;
     private bool loading;
     private double progress;
-    private string progressText = "Starting...";
 
     private string? photoDataUrl;
+    private string? photoTime;
 
-    private readonly List<ChatMessage> chat = new();
+    private readonly List<ChatEntry> chat = new();
     private string question = "";
     private string streaming = "";
     private bool busy;
     private string? error;
 
-    // How many past messages we send back to the AI (it can read only 4096 tokens at a time).
     private const int MaxHistory = 6;
+
+    private int Percent => (int)Math.Round(progress * 100);
+
+    private string AiChipText => Ai.IsLoaded ? "AI ready · offline"
+        : loading ? $"AI starting {Percent}%"
+        : supported == false ? "AI not supported here"
+        : "AI not started";
+
+    private string AiChipClass => Ai.IsLoaded ? "chip-ok" : supported == false ? "chip-warn" : "";
 
     protected override void OnInitialized()
     {
@@ -100,56 +207,77 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (!firstRender) return;
+        supported = await Ai.IsSupportedAsync();
+        if (supported == true && !Ai.IsLoaded)
         {
-            supported = await Ai.IsSupportedAsync();
-            StateHasChanged();
+            cachedModel = await Ai.IsCachedAsync();
+            if (cachedModel)
+            {
+                await LoadAi();
+            }
         }
+        StateHasChanged();
     }
 
     private async Task LoadAi()
     {
         loading = true;
         error = null;
+        StateHasChanged();
         try
         {
             await Ai.LoadAsync();
         }
         catch (Exception ex)
         {
-            error = "Could not load the AI: " + ex.Message;
+            error = "Could not start the AI: " + ex.Message;
         }
         loading = false;
     }
 
     private async Task OnPhotoSelected(InputFileChangeEventArgs e)
     {
-        // Shrink the photo so it stays light in memory.
         var resized = await e.File.RequestImageFileAsync("image/jpeg", 1024, 1024);
         using var stream = resized.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
         using var ms = new MemoryStream();
         await stream.CopyToAsync(ms);
         photoDataUrl = "data:image/jpeg;base64," + Convert.ToBase64String(ms.ToArray());
+        photoTime = DateTime.Now.ToString("HH:mm");
+    }
+
+    private async Task Send(string text)
+    {
+        question = text;
+        await Ask();
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.CtrlKey && e.Key == "Enter")
+        {
+            await Ask();
+        }
     }
 
     private async Task Ask()
     {
         var text = question.Trim();
-        if (text.Length == 0) return;
+        if (text.Length == 0 || busy || !Ai.IsLoaded) return;
 
-        chat.Add(new ChatMessage("user", text));
+        chat.Add(new ChatEntry(true, text));
         question = "";
-        streaming = "";
         error = null;
         busy = true;
 
-        var messages = new List<ChatMessage> { new("system", SkinKnowledge.SystemPrompt) };
-        messages.AddRange(chat.TakeLast(MaxHistory));
-
         try
         {
-            var answer = await Ai.AskAsync(messages);
-            chat.Add(new ChatMessage("assistant", answer));
+            var answer = await GetAnswer(retry: false);
+            if (SkinKnowledge.LooksLikeRefusal(answer))
+            {
+                answer = await GetAnswer(retry: true);
+            }
+            chat.Add(new ChatEntry(false, answer));
         }
         catch (Exception ex)
         {
@@ -159,10 +287,41 @@
         busy = false;
     }
 
+    private Task<string> GetAnswer(bool retry)
+    {
+        streaming = "";
+        var messages = new List<ChatMessage> { new("system", SkinKnowledge.SystemPrompt) };
+        var firstCase = chat.FirstOrDefault(e => e.FromDoctor);
+        foreach (var entry in chat.TakeLast(MaxHistory))
+        {
+            if (!entry.FromDoctor)
+            {
+                messages.Add(new ChatMessage("assistant", entry.Text));
+            }
+            else
+            {
+                var wrapped = ReferenceEquals(entry, firstCase)
+                    ? SkinKnowledge.WrapCase(entry.Text)
+                    : SkinKnowledge.WrapFollowUp(entry.Text);
+                messages.Add(new ChatMessage("user", wrapped));
+            }
+        }
+        if (firstCase is not null && !chat.TakeLast(MaxHistory).Contains(firstCase))
+        {
+            messages.Insert(1, new ChatMessage("user", SkinKnowledge.WrapCase(firstCase.Text)));
+        }
+        if (retry)
+        {
+            messages.Add(new ChatMessage("user", SkinKnowledge.RetryNote));
+        }
+        return Ai.AskAsync(messages);
+    }
+
     private void NewCase()
     {
         chat.Clear();
         photoDataUrl = null;
+        photoTime = null;
         question = "";
         error = null;
     }
@@ -170,7 +329,6 @@
     private void OnProgress(double value, string text)
     {
         progress = value;
-        progressText = text;
         InvokeAsync(StateHasChanged);
     }
 
@@ -180,8 +338,46 @@
         InvokeAsync(StateHasChanged);
     }
 
-    // The model sometimes writes **bold** markdown; show it as plain text.
-    private static string Clean(string text) => text.Replace("**", "");
+    private static readonly Regex Bullet = new(@"^\s*([*\-•]|\d+[.)]|[IVX]+\.)\s+");
+    private static readonly Regex EchoedHeading = new(@"^(Rules|Background facts|Important)\b", RegexOptions.IgnoreCase);
+
+    private static MarkupString Format(string text)
+    {
+        var html = new StringBuilder();
+        var inList = false;
+
+        foreach (var raw in text.Replace("**", "").Split('\n'))
+        {
+            var line = raw.Trim().TrimStart('#').Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            var isHeading = line.EndsWith(':') && line.Length < 60;
+            if (isHeading)
+            {
+                if (inList) { html.Append("</ul>"); inList = false; }
+                var heading = Bullet.Replace(line, "").TrimEnd(':');
+                if (EchoedHeading.IsMatch(heading)) break;
+                var cls = heading.Contains("Warning", StringComparison.OrdinalIgnoreCase) ? " class=\"warn\"" : "";
+                html.Append($"<h4{cls}>{WebUtility.HtmlEncode(heading)}</h4>");
+            }
+            else if (Bullet.IsMatch(line))
+            {
+                if (!inList) { html.Append("<ul>"); inList = true; }
+                html.Append($"<li>{WebUtility.HtmlEncode(Bullet.Replace(line, ""))}</li>");
+            }
+            else
+            {
+                if (inList) { html.Append("</ul>"); inList = false; }
+                html.Append($"<p>{WebUtility.HtmlEncode(line)}</p>");
+            }
+        }
+
+        if (inList) html.Append("</ul>");
+        return new MarkupString(html.ToString());
+    }
 
     public void Dispose()
     {
